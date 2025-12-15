@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Magic Christmas Tree</title>
+
+<style>
+html,body{
+  margin:0;
+  padding:0;
+  width:100%;
+  height:100%;
+  overflow:hidden;
+  background:#020205;
+  font-family:"Segoe UI",system-ui,-apple-system;
+}
+#canvas-container{
+  position:absolute;
+  inset:0;
+}
+#loading{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+  color:#ffd700;
+  letter-spacing:2px;
+  font-size:18px;
+  background:radial-gradient(circle,rgba(0,0,0,.4),rgba(0,0,0,.85));
+  z-index:10;
+}
+#status{
+  position:absolute;
+  top:20px;
+  left:50%;
+  transform:translateX(-50%);
+  color:#ffd700;
+  font-size:12px;
+  letter-spacing:3px;
+  opacity:.85;
+  z-index:5;
+}
+</style>
+
+<!-- Three.js 核心 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<!-- 后期处理（安全组合，不用 ShaderPass） -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+</head>
+
+<body>
+<div id="loading">✨ 正在装载圣诞记忆…</div>
+<div id="status">STATE · INITIALIZING</div>
+<div id="canvas-container"></div>
+
+<script>
+/* ======================================================
+   1. Three.js 初始化
+====================================================== */
+const container = document.getElementById("canvas-container");
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x020205,0.0022);
+
+const camera = new THREE.PerspectiveCamera(
+  60,
+  window.innerWidth/window.innerHeight,
+  0.1,
+  2000
+);
+camera.position.set(0,20,140);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.85;
+renderer.outputEncoding = THREE.sRGBEncoding;
+container.appendChild(renderer.domElement);
+
+/* ======================================================
+   2. 灯光（避免过曝）
+====================================================== */
+scene.add(new THREE.AmbientLight(0xffffff,0.12));
+
+const keyLight = new THREE.PointLight(0xffb03a,1.6,200);
+keyLight.position.set(0,40,30);
+scene.add(keyLight);
+
+const rimLight = new THREE.DirectionalLight(0x5577ff,1.0);
+rimLight.position.set(-50,30,-50);
+scene.add(rimLight);
+
+/* ======================================================
+   3. Bloom 后期（稳定写法）
+====================================================== */
+const composer = new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene,camera));
+
+const bloom = new THREE.UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth,window.innerHeight),
+  0.9,
+  0.45,
+  0.85
+);
+composer.addPass(bloom);
+
+/* ======================================================
+   4. 圣诞树粒子
+====================================================== */
+const objects = [];
+const geoSphere = new THREE.SphereGeometry(1,16,16);
+
+const matGold = new THREE.MeshStandardMaterial({
+  color:0xffd700,
+  metalness:.9,
+  roughness:.3,
+  emissive:0x442a00,
+  emissiveIntensity:.15
+});
+const matRed = new THREE.MeshStandardMaterial({
+  color:0xcc0000,
+  metalness:.6,
+  roughness:.4,
+  emissive:0x330000,
+  emissiveIntensity:.12
+});
+const matGreen = new THREE.MeshStandardMaterial({
+  color:0x054a25,
+  metalness:.2,
+  roughness:.85
+});
+
+const COUNT = 480;
+const HEIGHT = 90;
+const RADIUS = 38;
+
+for(let i=0;i<COUNT;i++){
+  const p = i/COUNT;
+  const angle = p*Math.PI*24;
+  const y = HEIGHT/2 - HEIGHT*p;
+  const r = RADIUS*p;
+
+  const x = r*Math.cos(angle)+(Math.random()-.5)*2;
+  const z = r*Math.sin(angle)+(Math.random()-.5)*2;
+
+  let mat = matGreen;
+  const rand = Math.random();
+  if(rand>0.65) mat = matGold;
+  else if(rand>0.35) mat = matRed;
+
+  const m = new THREE.Mesh(geoSphere,mat);
+  m.scale.setScalar(Math.random()*.8+.4);
+  m.position.set(x,y,z);
+  m.userData = {
+    base:new THREE.Vector3(x,y,z),
+    phase:Math.random()*Math.PI*2
+  };
+
+  scene.add(m);
+  objects.push(m);
+}
+
+/* ======================================================
+   5. 雪花（sprite，不是方块）
+====================================================== */
+function createSnowTexture(){
+  const c=document.createElement("canvas");
+  c.width=c.height=64;
+  const g=c.getContext("2d");
+  g.clearRect(0,0,64,64);
+  g.fillStyle="white";
+  g.beginPath();
+  g.arc(32,32,18,0,Math.PI*2);
+  g.fill();
+  return new THREE.CanvasTexture(c);
+}
+
+const snowGeo = new THREE.BufferGeometry();
+const snowCount = 2000;
+const snowPos = new Float32Array(snowCount*3);
+const snowSpeed = new Float32Array(snowCount);
+
+for(let i=0;i<snowCount;i++){
+  snowPos[i*3]   =(Math.random()-.5)*500;
+  snowPos[i*3+1]=Math.random()*200-50;
+  snowPos[i*3+2]=(Math.random()-.5)*500;
+  snowSpeed[i]=.2+Math.random()*.4;
+}
+snowGeo.setAttribute("position",new THREE.BufferAttribute(snowPos,3));
+
+const snowMat = new THREE.PointsMaterial({
+  size:1.6,
+  transparent:true,
+  opacity:.9,
+  map:createSnowTexture(),
+  depthWrite:false,
+  blending:THREE.AdditiveBlending
+});
+const snow = new THREE.Points(snowGeo,snowMat);
+scene.add(snow);
+
+/* ======================================================
+   6. 动画循环
+====================================================== */
+function animate(){
+  requestAnimationFrame(animate);
+  const t = performance.now()*.001;
+
+  // 树呼吸 & 旋转
+  objects.forEach(o=>{
+    o.position.y = o.userData.base.y + Math.sin(t+o.userData.phase)*.5;
+    o.rotation.y += .01;
+  });
+
+  // 雪下落
+  const arr = snowGeo.attributes.position.array;
+  for(let i=0;i<snowCount;i++){
+    const id=i*3;
+    arr[id+1]-=snowSpeed[i];
+    if(arr[id+1]<-100) arr[id+1]=150;
+  }
+  snowGeo.attributes.position.needsUpdate=true;
+
+  composer.render();
+}
+animate();
+
+/* ======================================================
+   7. 启动完成
+====================================================== */
+document.getElementById("loading").style.display="none";
+document.getElementById("status").innerText="STATE · READY";
+
+window.addEventListener("resize",()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  composer.setSize(window.innerWidth,window.innerHeight);
+});
+</script>
+</body>
+</html>
+
